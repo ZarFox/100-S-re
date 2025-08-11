@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Console • Discord Bot</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100">
+  <div class="max-w-5xl mx-auto p-4 space-y-4">
+    <header class="flex items-center justify-between">
+      <h1 class="text-xl font-bold">Console temps réel</h1>
+      <a href="/" class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700">← Dashboard</a>
+    </header>
+
+    <div class="rounded-2xl border border-slate-800 bg-black p-3">
+      <pre id="logBox" class="whitespace-pre-wrap h-[75vh] overflow-y-auto text-sm"></pre>
+    </div>
+  </div>
+
+  <script>
+    // Mets la même clé que dans .env (DASHBOARD_API_KEY)
+    const API_KEY = "super-cle-secrete-123";
+
+    const logBox = document.getElementById('logBox');
+    const es = new EventSource('/api/logs/stream?key=' + encodeURIComponent(API_KEY));
+
+    function append(line) {
+      logBox.textContent += line + '\n';
+      logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    es.onmessage = (ev) => append(ev.data);
+    es.onerror = () => append('[SSE] erreur de connexion (reconnexion automatique)…');
+  </script>
+</body>
+</html>

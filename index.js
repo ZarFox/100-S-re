@@ -3,6 +3,7 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
+import { EventEmitter } from 'events';
 import {
   Client,
   GatewayIntentBits,
@@ -80,24 +81,24 @@ client.on('guildCreate', async (guild) => {
   }
 });
 
-// Gestion du préfixe "!" pour commandes perso
-client.on('messageCreate', (message) => {
+// Gestion du préfixe "!" pour commandes perso + log des messages
+client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
-  // Log simple en console
-  console.log(`[MESSAGE CMD] ${message.author.tag} (${message.author.id}) a dit : ${message.content} dans #${message.channel.name}`);
+  // Log simple message
+  try {
+    console.log(`[MESSAGE] ${message.author.tag} (${message.author.id}) @ ${message.guild?.name || 'DM'}/#${message.channel?.name || 'dm'} : ${message.content}`);
+  } catch (_) {}
 
-  if (message.content.trim().toLowerCase() === 'ping') {
-    message.channel.send('pong 🏓');
-  }
-});
-  
+  const content = message.content.trim();
+
   // Déclencheur custom: "!nom"
   if (content.startsWith('!') && content.length > 1) {
     const name = content.slice(1).split(/\s+/)[0];
     const map = getGuildMap(message.guild?.id || 'dm');
     const reply = map[name];
     if (reply) {
+      console.log(`[CUSTOM USE] !${name} @ ${message.guild?.name || message.guildId}`);
       await message.channel.send({
         content: reply,
         allowedMentions: { parse: [] }
@@ -160,22 +161,15 @@ async function upsertBuiltinSlashForAllGuilds() {
   }
 }
 
-// Handler slash (built-in + exemples ping/say + fallback)
+// Handler slash (built-in + exemples ping/say + fallback) + LOGS
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
-  // --- LOG : qui, où, quoi, avec quelles options ---
-  const where =
-    `${interaction.guild?.name || 'DM'}`
-    + (interaction.channel?.name ? `/#${interaction.channel.name}` : '');
+  // LOG détaillé
+  const where = `${interaction.guild?.name || 'DM'}${interaction.channel?.name ? `/#${interaction.channel.name}` : ''}`;
   const optsStr = (interaction.options?.data || [])
-    .map(o => `${o.name}=${JSON.stringify(o.value)}`)
-    .join(', ');
-  console.log(
-    `[SLASH] ${interaction.user.tag} (${interaction.user.id}) `
-    + `→ /${interaction.commandName} `
-    + `@ ${where}${optsStr ? ` | ${optsStr}` : ''}`
-  );
+    .map(o => `${o.name}=${JSON.stringify(o.value)}`).join(', ');
+  console.log(`[SLASH] ${interaction.user.tag} (${interaction.user.id}) → /${interaction.commandName} @ ${where}${optsStr ? ` | ${optsStr}` : ''}`);
 
   try {
     // Built-in
@@ -191,63 +185,41 @@ client.on('interactionCreate', async (interaction) => {
       const map = getGuildMap(interaction.guildId);
       map[name] = msg;
       await saveCustom();
-
       console.log(`[CUSTOM] ADD !${name} @ ${interaction.guild?.name || interaction.guildId}`);
-      return interaction.reply({
-        content: `✅ Ajouté: \`!${name}\``,
-        flags: MessageFlags.Ephemeral
-      });
+      return interaction.reply({ content: `✅ Ajouté: \`!${name}\``, flags: MessageFlags.Ephemeral });
     }
 
     if (interaction.commandName === 'list') {
       const map = getGuildMap(interaction.guildId);
       const entries = Object.entries(map);
       if (!entries.length) {
-        return interaction.reply({
-          content: 'Aucune commande perso ici.',
-          flags: MessageFlags.Ephemeral
-        });
+        return interaction.reply({ content: 'Aucune commande perso ici.', flags: MessageFlags.Ephemeral });
       }
       const list = entries
         .slice(0, 50)
         .map(([k, v]) => `• \`!${k}\` → ${v.slice(0,60)}${v.length>60?'…':''}`)
         .join('\n');
-
       console.log(`[CUSTOM] LIST (${entries.length}) @ ${interaction.guild?.name || interaction.guildId}`);
-      return interaction.reply({
-        content: `**Commandes perso (${entries.length})**\n${list}`,
-        flags: MessageFlags.Ephemeral
-      });
+      return interaction.reply({ content: `**Commandes perso (${entries.length})**\n${list}`, flags: MessageFlags.Ephemeral });
     }
 
     if (interaction.commandName === 'remove') {
       const name = (interaction.options.getString('commande', true) || '').trim();
       const map = getGuildMap(interaction.guildId);
       if (!map[name]) {
-        return interaction.reply({
-          content: `❌ \`!${name}\` n’existe pas.`,
-          flags: MessageFlags.Ephemeral
-        });
+        return interaction.reply({ content: `❌ \`!${name}\` n’existe pas.`, flags: MessageFlags.Ephemeral });
       }
       delete map[name];
       await saveCustom();
-
       console.log(`[CUSTOM] REMOVE !${name} @ ${interaction.guild?.name || interaction.guildId}`);
-      return interaction.reply({
-        content: `🗑️ Supprimé: \`!${name}\``,
-        flags: MessageFlags.Ephemeral
-      });
+      return interaction.reply({ content: `🗑️ Supprimé: \`!${name}\``, flags: MessageFlags.Ephemeral });
     }
 
     // Exemples existants
     if (interaction.commandName === 'ping') {
       const ws = client.ws.ping;
-      return interaction.reply({
-        content: `pong 🏓 (WS ~${ws}ms)`,
-        flags: MessageFlags.Ephemeral
-      });
+      return interaction.reply({ content: `pong 🏓 (WS ~${ws}ms)`, flags: MessageFlags.Ephemeral });
     }
-
     if (interaction.commandName === 'say') {
       const m = interaction.options.getString('message', true);
       await interaction.reply({ content: '✅ Envoyé !', flags: MessageFlags.Ephemeral });
@@ -258,10 +230,7 @@ client.on('interactionCreate', async (interaction) => {
     const parts = [];
     for (const opt of interaction.options.data) if (opt?.value) parts.push(String(opt.value));
     const text = parts.join(' ').trim() || '(aucun texte)';
-    await interaction.reply({
-      content: `🛠️ /${interaction.commandName} — reçu: ${text}`,
-      flags: MessageFlags.Ephemeral
-    });
+    await interaction.reply({ content: `🛠️ /${interaction.commandName} — reçu: ${text}`, flags: MessageFlags.Ephemeral });
 
   } catch (err) {
     console.error('❌ Erreur handler slash:', err);
@@ -277,10 +246,23 @@ client.on('interactionCreate', async (interaction) => {
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Fichiers statiques + JSON
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
-// Protection API simple
+// --- Bus de logs + patch console pour SSE ---
+const logBus = new EventEmitter();
+const origLog = console.log;
+const origErr = console.error;
+function fmtLog(args) {
+  const s = args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+  const ts = new Date().toISOString();
+  return `[${ts}] ${s}`;
+}
+console.log = (...args) => { const m = fmtLog(args); logBus.emit('msg', m); origLog(...args); };
+console.error = (...args) => { const m = fmtLog(args); logBus.emit('msg', m); origErr(...args); };
+
+// Protection API (header x-api-key ; et pour /api/logs/stream, accepte aussi ?key=)
 console.log(
   process.env.DASHBOARD_API_KEY
     ? `🔐 API key activée (len=${process.env.DASHBOARD_API_KEY.length})`
@@ -289,11 +271,9 @@ console.log(
 app.use('/api', (req, res, next) => {
   const required = process.env.DASHBOARD_API_KEY;
   if (!required) return next();
-  const received = req.header('x-api-key') || '';
-  const ok = received === required;
-  const mask = (s) => (s ? s[0] + '***' + s.slice(-1) : '(vide)');
-  console.log(`API key check → ok=${ok} | required=${mask(required)} | received=${mask(received)} | path=${req.path}`);
-  if (!ok) return res.status(401).json({ error: 'API key invalide' });
+  const isLogsStream = req.path.startsWith('/logs/stream');
+  const received = req.header('x-api-key') || (isLogsStream ? req.query.key : '');
+  if (received !== required) return res.status(401).json({ error: 'API key invalide' });
   next();
 });
 
@@ -468,6 +448,28 @@ app.delete('/api/slash/delete', async (req, res) => {
     console.error('❌ REST delete', e);
     res.status(500).json({ error: e.rawError?.message || e.message || 'Échec suppression' });
   }
+});
+
+// --- SSE: stream des logs ---
+app.get('/api/logs/stream', (req, res) => {
+  res.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+  });
+  res.flushHeaders?.();
+
+  const send = (m) => res.write(`data: ${m}\n\n`);
+  const onMsg = (m) => send(m);
+  const keep = setInterval(() => res.write(': keepalive\n\n'), 15000);
+
+  logBus.on('msg', onMsg);
+  send('--- session ouverte ---');
+
+  req.on('close', () => {
+    clearInterval(keep);
+    logBus.off('msg', onMsg);
+  });
 });
 
 // route racine → public/index.html
