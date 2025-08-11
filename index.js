@@ -81,11 +81,17 @@ client.on('guildCreate', async (guild) => {
 });
 
 // Gestion du préfixe "!" pour commandes perso
-client.on('messageCreate', async (message) => {
+client.on('messageCreate', (message) => {
   if (message.author.bot) return;
 
-  const content = message.content.trim();
+  // Log simple en console
+  console.log(`[MESSAGE CMD] ${message.author.tag} (${message.author.id}) a dit : ${message.content} dans #${message.channel.name}`);
 
+  if (message.content.trim().toLowerCase() === 'ping') {
+    message.channel.send('pong 🏓');
+  }
+});
+  
   // Déclencheur custom: "!nom"
   if (content.startsWith('!') && content.length > 1) {
     const name = content.slice(1).split(/\s+/)[0];
@@ -158,46 +164,90 @@ async function upsertBuiltinSlashForAllGuilds() {
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
+  // --- LOG : qui, où, quoi, avec quelles options ---
+  const where =
+    `${interaction.guild?.name || 'DM'}`
+    + (interaction.channel?.name ? `/#${interaction.channel.name}` : '');
+  const optsStr = (interaction.options?.data || [])
+    .map(o => `${o.name}=${JSON.stringify(o.value)}`)
+    .join(', ');
+  console.log(
+    `[SLASH] ${interaction.user.tag} (${interaction.user.id}) `
+    + `→ /${interaction.commandName} `
+    + `@ ${where}${optsStr ? ` | ${optsStr}` : ''}`
+  );
+
   try {
     // Built-in
     if (interaction.commandName === 'add') {
       const name = (interaction.options.getString('commande', true) || '').trim();
-      const msg = interaction.options.getString('message', true);
+      const msg  = interaction.options.getString('message', true);
       if (!isValidCustomName(name)) {
-        return interaction.reply({ content: '❌ Nom invalide. Pas d’espace, 1–32 caractères.', flags: MessageFlags.Ephemeral });
+        return interaction.reply({
+          content: '❌ Nom invalide. Pas d’espace, 1–32 caractères.',
+          flags: MessageFlags.Ephemeral
+        });
       }
       const map = getGuildMap(interaction.guildId);
       map[name] = msg;
       await saveCustom();
-      return interaction.reply({ content: `✅ Ajouté: \`!${name}\``, flags: MessageFlags.Ephemeral });
+
+      console.log(`[CUSTOM] ADD !${name} @ ${interaction.guild?.name || interaction.guildId}`);
+      return interaction.reply({
+        content: `✅ Ajouté: \`!${name}\``,
+        flags: MessageFlags.Ephemeral
+      });
     }
 
     if (interaction.commandName === 'list') {
       const map = getGuildMap(interaction.guildId);
       const entries = Object.entries(map);
       if (!entries.length) {
-        return interaction.reply({ content: 'Aucune commande perso ici.', flags: MessageFlags.Ephemeral });
+        return interaction.reply({
+          content: 'Aucune commande perso ici.',
+          flags: MessageFlags.Ephemeral
+        });
       }
-      const list = entries.slice(0, 50).map(([k, v]) => `• \`!${k}\` → ${v.slice(0,60)}${v.length>60?'…':''}`).join('\n');
-      return interaction.reply({ content: `**Commandes perso (${entries.length})**\n${list}`, flags: MessageFlags.Ephemeral });
+      const list = entries
+        .slice(0, 50)
+        .map(([k, v]) => `• \`!${k}\` → ${v.slice(0,60)}${v.length>60?'…':''}`)
+        .join('\n');
+
+      console.log(`[CUSTOM] LIST (${entries.length}) @ ${interaction.guild?.name || interaction.guildId}`);
+      return interaction.reply({
+        content: `**Commandes perso (${entries.length})**\n${list}`,
+        flags: MessageFlags.Ephemeral
+      });
     }
 
     if (interaction.commandName === 'remove') {
       const name = (interaction.options.getString('commande', true) || '').trim();
       const map = getGuildMap(interaction.guildId);
       if (!map[name]) {
-        return interaction.reply({ content: `❌ \`!${name}\` n’existe pas.`, flags: MessageFlags.Ephemeral });
+        return interaction.reply({
+          content: `❌ \`!${name}\` n’existe pas.`,
+          flags: MessageFlags.Ephemeral
+        });
       }
       delete map[name];
       await saveCustom();
-      return interaction.reply({ content: `🗑️ Supprimé: \`!${name}\``, flags: MessageFlags.Ephemeral });
+
+      console.log(`[CUSTOM] REMOVE !${name} @ ${interaction.guild?.name || interaction.guildId}`);
+      return interaction.reply({
+        content: `🗑️ Supprimé: \`!${name}\``,
+        flags: MessageFlags.Ephemeral
+      });
     }
 
     // Exemples existants
     if (interaction.commandName === 'ping') {
       const ws = client.ws.ping;
-      return interaction.reply({ content: `pong 🏓 (WS ~${ws}ms)`, flags: MessageFlags.Ephemeral });
+      return interaction.reply({
+        content: `pong 🏓 (WS ~${ws}ms)`,
+        flags: MessageFlags.Ephemeral
+      });
     }
+
     if (interaction.commandName === 'say') {
       const m = interaction.options.getString('message', true);
       await interaction.reply({ content: '✅ Envoyé !', flags: MessageFlags.Ephemeral });
@@ -208,9 +258,13 @@ client.on('interactionCreate', async (interaction) => {
     const parts = [];
     for (const opt of interaction.options.data) if (opt?.value) parts.push(String(opt.value));
     const text = parts.join(' ').trim() || '(aucun texte)';
-    await interaction.reply({ content: `🛠️ /${interaction.commandName} — reçu: ${text}`, flags: MessageFlags.Ephemeral });
+    await interaction.reply({
+      content: `🛠️ /${interaction.commandName} — reçu: ${text}`,
+      flags: MessageFlags.Ephemeral
+    });
+
   } catch (err) {
-    console.error(err);
+    console.error('❌ Erreur handler slash:', err);
     if (interaction.deferred || interaction.replied) {
       await interaction.followUp({ content: '❌ Oups, une erreur est survenue.', flags: MessageFlags.Ephemeral });
     } else {
