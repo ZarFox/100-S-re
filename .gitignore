@@ -1,0 +1,12 @@
+# Node
+node_modules/
+npm-debug.log*
+package-lock.json
+
+# Secrets / données locales
+.env
+data/*.json
+
+# OS
+.DS_Store
+Thumbs.db

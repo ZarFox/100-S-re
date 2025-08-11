@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Discord Bot • Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100">
+  <div class="max-w-5xl mx-auto p-6 space-y-6">
+    <header class="flex items-center justify-between">
+      <h1 class="text-2xl font-bold">Discord Bot • Dashboard</h1>
+      <button id="refresh" class="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500">Rafraîchir</button>
+    </header>
+
+    <!-- Statut -->
+    <section class="rounded-2xl border border-slate-800 bg-slate-900 p-5 shadow">
+      <h2 class="text-xl font-semibold mb-3">Statut</h2>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+        <div><div class="text-slate-400">Connecté</div><div id="online" class="font-medium">—</div></div>
+        <div><div class="text-slate-400">Utilisateur</div><div id="userTag" class="font-medium">—</div></div>
+        <div><div class="text-slate-400">Guilds</div><div id="guildCount" class="font-medium">—</div></div>
+        <div><div class="text-slate-400">Ping WS</div><div id="wsPing" class="font-medium">—</div></div>
+      </div>
+    </section>
+
+    <!-- Envoi message -->
+    <section class="rounded-2xl border border-slate-800 bg-slate-900 p-5 shadow space-y-3">
+      <h2 class="text-xl font-semibold">Envoyer un message</h2>
+
+      <div class="grid sm:grid-cols-2 gap-3">
+        <select id="guildSelect" class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700">
+          <option value="">— Choisir un serveur —</option>
+        </select>
+
+        <select id="channelSelect" class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700" disabled>
+          <option value="">— Choisir un salon —</option>
+        </select>
+      </div>
+
+      <div class="grid sm:grid-cols-2 gap-3">
+        <input id="message" class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700" placeholder="Message" />
+      </div>
+
+      <button id="send" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500">Envoyer</button>
+      <div id="sendResult" class="text-sm text-slate-400"></div>
+    </section>
+
+    <!-- Commandes perso (!) -->
+    <section class="rounded-2xl border border-slate-800 bg-slate-900 p-5 shadow space-y-4">
+      <h2 class="text-xl font-semibold">Commandes perso (préfixe <code>!</code>)</h2>
+
+      <div class="grid md:grid-cols-3 gap-3">
+        <select id="customGuild" class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700">
+          <option value="">— Choisir un serveur —</option>
+        </select>
+
+        <input id="customName" class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700"
+               placeholder='Nom (sans "!") — ex: 100%' />
+
+        <input id="customResponse" class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700"
+               placeholder='Message (ex: Info 100% sûre)' />
+      </div>
+
+      <div class="flex gap-3">
+        <button id="customAdd" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500">Ajouter / Écraser</button>
+        <button id="customReload" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500">Rafraîchir la liste</button>
+        <div id="customResult" class="text-sm text-slate-400"></div>
+      </div>
+
+      <div class="border-t border-slate-800 pt-4">
+        <h3 class="font-medium mb-2">Commandes existantes</h3>
+        <div id="customList" class="space-y-2 text-sm"></div>
+      </div>
+
+      <p class="text-xs text-slate-500">
+        Dans Discord : tapez <code>!nom</code> (ex: <code>!100%</code>). <br/>
+        Gestion aussi via <code>/add</code>, <code>/list</code>, <code>/remove</code>.
+      </p>
+    </section>
+
+    <!-- Slash Commands (génériques) -->
+    <section class="rounded-2xl border border-slate-800 bg-slate-900 p-5 shadow space-y-4">
+      <h2 class="text-xl font-semibold">Créer des Slash Commands (génériques)</h2>
+
+      <div class="grid sm:grid-cols-3 gap-3">
+        <select id="slashScope" class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700">
+          <option value="guild">Scope: Guild (recommandé)</option>
+          <option value="global">Scope: Global</option>
+        </select>
+
+        <select id="slashGuild" class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700" disabled>
+          <option value="">— Serveur pour le scope guild —</option>
+        </select>
+
+        <button id="slashRefresh" class="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500">Lister les commandes</button>
+      </div>
+
+      <div class="grid sm:grid-cols-2 gap-3">
+        <input id="cmdName" class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700" placeholder="Nom (ex: hello-world)" />
+        <input id="cmdDesc" class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700" placeholder="Description (1–100 chars)" />
+      </div>
+
+      <div class="space-y-2">
+        <div class="flex items-center justify-between">
+          <h3 class="font-medium">Options (texte)</h3>
+          <button id="addOption" class="px-3 py-1 rounded-lg bg-slate-800 border border-slate-700">+ Ajouter une option</button>
+        </div>
+        <div id="optionsBox" class="space-y-2"></div>
+      </div>
+
+      <div class="flex gap-3">
+        <button id="deployCmd" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500">Déployer</button>
+        <div id="deployResult" class="text-sm text-slate-400"></div>
+      </div>
+
+      <div class="border-t border-slate-800 pt-4">
+        <h3 class="font-medium mb-2">Commandes existantes</h3>
+        <div id="cmdList" class="space-y-2 text-sm"></div>
+      </div>
+    </section>
+
+    <footer class="text-xs text-slate-500">MVP • Protège l’API si tu publies ce dashboard</footer>
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
