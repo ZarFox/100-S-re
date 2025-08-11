@@ -7,31 +7,97 @@
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-950 text-slate-100">
-  <div class="max-w-5xl mx-auto p-4 space-y-4">
-    <header class="flex items-center justify-between">
-      <h1 class="text-xl font-bold">Console temps réel</h1>
-      <a href="/" class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700">← Dashboard</a>
+  <div class="max-w-6xl mx-auto p-4 space-y-4">
+    <header class="flex items-center justify-between gap-2">
+      <h1 class="text-xl font-bold">Console temps réel — filtrable</h1>
+      <div class="flex items-center gap-2">
+        <a href="/" class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700">← Dashboard</a>
+        <a id="dlToday" class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700" download>Télécharger (aujourd’hui)</a>
+      </div>
     </header>
 
+    <!-- Filtres -->
+    <div class="grid md:grid-cols-5 gap-3">
+      <select id="typeSel" class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700">
+        <option value="">Type: tous</option>
+        <option value="slash">slash</option>
+        <option value="custom">custom</option>
+        <option value="message">message</option>
+        <option value="error">error</option>
+      </select>
+      <input id="guildId" class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700" placeholder="Guild ID (optionnel)" />
+      <input id="userId" class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700" placeholder="User ID (optionnel)" />
+      <button id="clearBtn" class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700">Effacer</button>
+      <button id="loadHist" class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700">Charger derniers (buffer)</button>
+    </div>
+
     <div class="rounded-2xl border border-slate-800 bg-black p-3">
-      <pre id="logBox" class="whitespace-pre-wrap h-[75vh] overflow-y-auto text-sm"></pre>
+      <pre id="logBox" class="whitespace-pre-wrap h-[70vh] overflow-y-auto text-sm"></pre>
     </div>
   </div>
 
   <script>
-    // Mets la même clé que dans .env (DASHBOARD_API_KEY)
-    const API_KEY = "Caca1234";
+    // même clé que .env
+    const API_KEY = "super-cle-secrete-123";
 
     const logBox = document.getElementById('logBox');
-    const es = new EventSource('/api/logs/stream?key=' + encodeURIComponent(API_KEY));
+    const typeSel = document.getElementById('typeSel');
+    const guildId = document.getElementById('guildId');
+    const userId = document.getElementById('userId');
+    const clearBtn = document.getElementById('clearBtn');
+    const loadHist = document.getElementById('loadHist');
+    const dlToday = document.getElementById('dlToday');
 
-    function append(line) {
+    function today() { return new Date().toISOString().slice(0,10); }
+    dlToday.href = `/api/events/file?date=${today()}&key=${encodeURIComponent(API_KEY)}`;
+
+    const buffer = []; // pour l’affichage
+    function matchFilters(evt) {
+      if (typeSel.value && evt.type !== typeSel.value) return false;
+      if (guildId.value && evt.guildId !== guildId.value.trim()) return false;
+      if (userId.value && evt.userId !== userId.value.trim()) return false;
+      return true;
+    }
+    function renderOne(evt) {
+      const line = `[${evt.ts}] (${evt.type})`
+        + (evt.guildName ? ` ${evt.guildName}` : '')
+        + (evt.channelName ? `/#${evt.channelName}` : '')
+        + (evt.userTag ? ` ${evt.userTag}` : '')
+        + (evt.commandName ? ` → ${evt.commandName}` : '')
+        + (evt.content ? ` | ${evt.content}` : '');
       logBox.textContent += line + '\n';
       logBox.scrollTop = logBox.scrollHeight;
     }
+    function rerender() {
+      logBox.textContent = '';
+      for (const evt of buffer) if (matchFilters(evt)) renderOne(evt);
+    }
 
-    es.onmessage = (ev) => append(ev.data);
-    es.onerror = () => append('[SSE] erreur de connexion (reconnexion automatique)…');
+    // SSE stream (événements structurés)
+    const es = new EventSource('/api/events/stream?key=' + encodeURIComponent(API_KEY));
+    es.onmessage = (ev) => {
+      try {
+        const evt = JSON.parse(ev.data);
+        buffer.push(evt);
+        if (matchFilters(evt)) renderOne(evt);
+      } catch {}
+    };
+    es.onerror = () => {
+      logBox.textContent += '[SSE] erreur de connexion (reconnexion auto)…\n';
+    };
+
+    typeSel.onchange = rerender;
+    guildId.oninput = rerender;
+    userId.oninput = rerender;
+    clearBtn.onclick = () => { buffer.length = 0; logBox.textContent = ''; };
+
+    loadHist.onclick = async () => {
+      const qs = new URLSearchParams({ key: API_KEY, type: typeSel.value, guildId: guildId.value, userId: userId.value, limit: '300' }).toString();
+      const res = await fetch('/api/events/query?' + qs, { headers: { 'x-api-key': API_KEY }});
+      const data = await res.json().catch(()=>({events:[]}));
+      buffer.push(...data.events);
+      rerender();
+    };
   </script>
 </body>
 </html>
