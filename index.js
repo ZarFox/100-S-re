@@ -46,7 +46,6 @@ const CUSTOM_NAME_RE = /^\S{1,32}$/;
 const isValidCustomName = (n) => CUSTOM_NAME_RE.test(n);
 
 // --- Event bus + persistent event logs (JSONL) ---
-const norm = (s) => String(s || '').toLowerCase();
 const eventBus = new EventEmitter();
 const EVENT_BUFFER = []; // derniers événements en mémoire
 const EVENT_BUFFER_MAX = 1000;
@@ -94,55 +93,6 @@ client.on('guildCreate', async (guild) => {
 // Logs messages + custom prefix
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
-
-  const guildId = message.guild?.id || 'dm';
-  const map = getGuildMap(guildId);
-
-  const content = message.content.trim();
-  const lower   = content.toLowerCase();
-
-  // --- LOG simple (optionnel)
-  try {
-    console.log(`[MESSAGE] ${message.author.tag} @ ${message.guild?.name || 'DM'}/#${message.channel?.name || 'dm'} : ${content}`);
-  } catch {}
-
-  // 1) Commande avec préfixe "!" (insensible à la casse)
-  if (lower.startsWith('!') && lower.length > 1) {
-    const rawName = lower.slice(1).split(/\s+/)[0];   // première "word" après !
-    const key = norm(rawName);
-    const reply = map[key];
-    if (reply) {
-      // log custom
-      try {
-        console.log(`[CUSTOM USE] !${rawName} @ ${message.guild?.name || guildId}`);
-      } catch {}
-      await message.channel.send({ content: reply, allowedMentions: { parse: [] } });
-      return; // on s’arrête ici si c’était une vraie commande "!"
-    }
-  }
-
-  // 2) Réponse si un "mot-clé" (nom de commande) apparaît N'IMPORTE OÙ dans le message
-  //    - insensible à la casse
-  //    - pour éviter trop de réponses, on ne répond qu'au PREMIER match (priorité aux plus longs)
-  const names = Object.keys(map);
-  if (names.length) {
-    // trier par longueur décroissante pour matcher les plus spécifiques d'abord
-    const sorted = names.sort((a, b) => b.length - a.length);
-    const found = sorted.find(n => lower.includes(n));
-    if (found) {
-      try {
-        console.log(`[CUSTOM HIT] mot-clé "${found}" détecté @ ${message.guild?.name || guildId}`);
-      } catch {}
-      await message.reply({ content: map[found], allowedMentions: { parse: [] } });
-      return;
-    }
-  }
-
-  // 3) Exemple: ping/pong
-  if (lower === 'ping') {
-    await message.channel.send({ content: 'pong 🏓', allowedMentions: { parse: [] } });
-  }
-
 
   // log message brut (si tu veux le filtrer côté UI, c'est "message")
   pushEvent({
@@ -248,17 +198,17 @@ client.on('interactionCreate', async (interaction) => {
 
   try {
     if (interaction.commandName === 'add') {
-  const raw = (interaction.options.getString('commande', true) || '').trim();
-  const name = norm(raw);
-  const msg  = interaction.options.getString('message', true);
-  if (!isValidCustomName(raw)) {
-    return interaction.reply({ content: '❌ Nom invalide. Pas d’espace, 1–32 caractères.', flags: MessageFlags.Ephemeral });
-  }
-  const map = getGuildMap(interaction.guildId);
-  map[name] = msg;             // <-- stocké en minuscule
-  await saveCustom();
-  return interaction.reply({ content: `✅ Ajouté: \`!${raw}\` (insensible à la casse)`, flags: MessageFlags.Ephemeral });
-  }
+      const name = (interaction.options.getString('commande', true) || '').trim();
+      const msg  = interaction.options.getString('message', true);
+      if (!isValidCustomName(name)) {
+        return interaction.reply({ content: '❌ Nom invalide. Pas d’espace, 1–32 caractères.', flags: MessageFlags.Ephemeral });
+      }
+      const map = getGuildMap(interaction.guildId);
+      map[name] = msg;
+      await saveCustom();
+      pushEvent({ type:'custom', action:'add', guildId:interaction.guildId, guildName:interaction.guild?.name, userId:interaction.user.id, userTag:interaction.user.tag, commandName:name, content:msg });
+      return interaction.reply({ content: `✅ Ajouté: \`!${name}\``, flags: MessageFlags.Ephemeral });
+    }
 
     if (interaction.commandName === 'list') {
       const map = getGuildMap(interaction.guildId);
@@ -271,16 +221,16 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.commandName === 'remove') {
-  const raw = (interaction.options.getString('commande', true) || '').trim();
-  const name = norm(raw);
-  const map = getGuildMap(interaction.guildId);
-  if (!map[name]) {
-    return interaction.reply({ content: `❌ \`!${raw}\` n’existe pas.`, flags: MessageFlags.Ephemeral });
-  }
-  delete map[name];
-  await saveCustom();
-  return interaction.reply({ content: `🗑️ Supprimé: \`!${raw}\``, flags: MessageFlags.Ephemeral });
-  }
+      const name = (interaction.options.getString('commande', true) || '').trim();
+      const map = getGuildMap(interaction.guildId);
+      if (!map[name]) {
+        return interaction.reply({ content: `❌ \`!${name}\` n’existe pas.`, flags: MessageFlags.Ephemeral });
+      }
+      delete map[name];
+      await saveCustom();
+      pushEvent({ type:'custom', action:'remove', guildId:interaction.guildId, guildName:interaction.guild?.name, userId:interaction.user.id, userTag:interaction.user.tag, commandName:name });
+      return interaction.reply({ content: `🗑️ Supprimé: \`!${name}\``, flags: MessageFlags.Ephemeral });
+    }
 
     if (interaction.commandName === 'randomcustom') {
       const map = getGuildMap(interaction.guildId);
