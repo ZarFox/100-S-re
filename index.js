@@ -142,7 +142,7 @@ client.on('messageCreate', async (message) => {
   if (lower === 'ping') {
     await message.channel.send({ content: 'pong 🏓', allowedMentions: { parse: [] } });
   }
-});
+
 
   // log message brut (si tu veux le filtrer côté UI, c'est "message")
   pushEvent({
