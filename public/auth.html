@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Authentification</title>
+  <link rel="stylesheet" href="auth.css" />
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+  <script type="module" src="Global.js"></script>
+  <script type="module" src="Authentificator.js"></script>
+</head>
+<body>
+  <style>
+    .main-nav a[href="admin.html"] {
+      display: none;
+    }
+  </style>
+  <div class="auth-container">
+    <div class="card">
+      <h2>Connexion</h2>
+      <input type="text" id="login-username" placeholder="Pseudo" />
+      <input type="password" id="login-password" placeholder="Mot de passe" />
+    
+      <div class="stay-connected">
+        <label for="stayLoggedIn">
+          <input type="checkbox" id="stayLoggedIn" />
+          Rester connecté
+        </label>
+      </div>
+    
+      <button onclick="loginUser()">Se connecter</button>
+    </div>
+
+    <div class="card">
+      <h2>Créer un compte</h2>
+      <input type="text" id="register-username" placeholder="Pseudo" />
+      <input type="password" id="register-password" placeholder="Mot de passe" />
+      <button onclick="registerUser()">Créer un compte</button>
+    </div>
+  </div>
+</body>
+</html>

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
 import { createWriteStream, existsSync, mkdirSync } from 'fs';
 import { EventEmitter } from 'events';
+import crypto from 'crypto';
 import {
   Client,
   GatewayIntentBits,
@@ -15,16 +16,16 @@ import {
   PermissionFlagsBits
 } from 'discord.js';
 
-// ====== ESM utils
+/* =======================
+   BASICS & STORAGE
+======================= */
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ====== DATA paths
 const DATA_DIR = path.join(__dirname, 'data');
 const CUSTOM_FILE = path.join(DATA_DIR, 'custom-commands.json');
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
 
-// ====== Helpers / storage
 const CUSTOM_NAME_RE = /^\S{1,32}$/;
 const isValidCustomName = (n) => CUSTOM_NAME_RE.test(n);
 const norm = (s) => String(s || '').toLowerCase();
@@ -43,21 +44,22 @@ async function saveCustom() {
   await fs.mkdir(DATA_DIR, { recursive: true });
   await fs.writeFile(CUSTOM_FILE, JSON.stringify(CUSTOM, null, 2), 'utf8');
 }
-function getGuildMap(guildId) {
-  if (!CUSTOM[guildId]) CUSTOM[guildId] = {};
-  return CUSTOM[guildId];
+function getGuildMap(gid) {
+  if (!CUSTOM[gid]) CUSTOM[gid] = {};
+  return CUSTOM[gid];
 }
 
-// ====== Event bus + JSONL persistent logs (console filtrable)
+/* =======================
+   EVENTS (console + JSONL)
+======================= */
 const eventBus = new EventEmitter();
 const EVENT_BUFFER = [];
 const EVENT_BUFFER_MAX = 1000;
 
 const nowIso = () => new Date().toISOString();
-const dayKey = (d = new Date()) => d.toISOString().slice(0, 10); // YYYY-MM-DD
+const dayKey = (d = new Date()) => d.toISOString().slice(0, 10);
 const eventLogPathFor = (date = new Date()) => path.join(DATA_DIR, `events-${dayKey(date)}.jsonl`);
-let currentStream = null;
-let currentDay = null;
+let currentStream = null, currentDay = null;
 
 function rotateEventStreamIfNeeded() {
   const today = dayKey();
@@ -76,7 +78,9 @@ function pushEvent(evt) {
   eventBus.emit('evt', evt);
 }
 
-// ====== Discord bot
+/* =======================
+   DISCORD BOT
+======================= */
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
@@ -86,12 +90,11 @@ client.once('ready', async () => {
   await loadCustom();
   try { await upsertBuiltinSlashForAllGuilds(); } catch (e) { console.error('Erreur upsert builtin slash:', e); }
 });
-
 client.on('guildCreate', async (guild) => {
   try { await upsertBuiltinSlashForGuild(guild.id); } catch (e) { console.error('Erreur upsert guildCreate:', e); }
 });
 
-// --- Message handler (UNIQUE, corrigé)
+// Réactions: préfixe "!" (case-insensitive) + mots-clés
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
@@ -101,7 +104,7 @@ client.on('messageCreate', async (message) => {
   const content = message.content.trim();
   const lower = content.toLowerCase();
 
-  // log message + push event
+  // log + event
   try { console.log(`[MESSAGE] ${message.author.tag} @ ${message.guild?.name || 'DM'}/#${message.channel?.name || 'dm'} : ${content}`); } catch {}
   pushEvent({
     type: 'message',
@@ -113,15 +116,14 @@ client.on('messageCreate', async (message) => {
     content
   });
 
-  // 1) Commande préfixe "!" insensible à la casse
+  // 1) Préfixe "!"
   if (lower.startsWith('!') && lower.length > 1) {
-    const rawName = lower.slice(1).split(/\s+/)[0]; // premier mot après "!"
+    const rawName = lower.slice(1).split(/\s+/)[0];
     const key = norm(rawName);
     const reply = map[key];
     if (reply) {
       pushEvent({
-        type: 'custom',
-        action: 'use',
+        type: 'custom', action: 'use',
         guildId, guildName: message.guild?.name || 'DM',
         channelName: message.channel?.name || 'dm',
         userId: message.author.id, userTag: message.author.tag,
@@ -132,15 +134,14 @@ client.on('messageCreate', async (message) => {
     }
   }
 
-  // 2) Mot-clé (nom de commande) présent n'importe où dans le texte (insensible à la casse)
+  // 2) Mot-clé inclus
   const names = Object.keys(map);
   if (names.length) {
-    const sorted = names.sort((a, b) => b.length - a.length); // prioriser les plus longs
+    const sorted = names.sort((a, b) => b.length - a.length); // plus spécifique d'abord
     const found = sorted.find(n => lower.includes(n));
     if (found) {
       pushEvent({
-        type: 'custom',
-        action: 'hit',
+        type: 'custom', action: 'hit',
         guildId, guildName: message.guild?.name || 'DM',
         channelName: message.channel?.name || 'dm',
         userId: message.author.id, userTag: message.author.tag,
@@ -151,7 +152,6 @@ client.on('messageCreate', async (message) => {
     }
   }
 
-  // 3) Exemple simple
   if (lower === 'ping') {
     await message.channel.send({ content: 'pong 🏓', allowedMentions: { parse: [] } });
   }
@@ -159,7 +159,9 @@ client.on('messageCreate', async (message) => {
 
 client.login(process.env.DISCORD_TOKEN);
 
-// ====== Slash commands (built-in + randomcustom)
+/* =======================
+   SLASH COMMANDS
+======================= */
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
 const APPLICATION_ID = process.env.APPLICATION_ID;
 
@@ -174,27 +176,15 @@ const BUILTIN_COMMANDS = [
       { type: 3, name: 'message', description: 'Message renvoyé par !commande', required: true }
     ]
   },
-  {
-    name: 'list',
-    description: 'Lister les commandes perso de ce serveur',
-    default_member_permissions: null,
-    dm_permission: false
-  },
+  { name: 'list', description: 'Lister les commandes perso de ce serveur', default_member_permissions: null, dm_permission: false },
   {
     name: 'remove',
     description: 'Supprimer une commande perso',
     default_member_permissions: String(PermissionFlagsBits.ManageGuild),
     dm_permission: false,
-    options: [
-      { type: 3, name: 'commande', description: 'Nom (sans "!")', required: true }
-    ]
+    options: [{ type: 3, name: 'commande', description: 'Nom (sans "!")', required: true }]
   },
-  {
-    name: 'randomcustom',
-    description: 'Publie au hasard une commande perso (!...) de ce serveur',
-    default_member_permissions: null,
-    dm_permission: false
-  }
+  { name: 'randomcustom', description: 'Publie au hasard une commande perso (!...) de ce serveur', default_member_permissions: null, dm_permission: false }
 ];
 
 async function upsertBuiltinSlashForGuild(gid) {
@@ -211,19 +201,14 @@ async function upsertBuiltinSlashForAllGuilds() {
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
-  const where = `${interaction.guild?.name || 'DM'}${interaction.channel?.name ? `/#${interaction.channel.name}` : ''}`;
   const optsStr = (interaction.options?.data || []).map(o => `${o.name}=${JSON.stringify(o.value)}`).join(', ');
   pushEvent({
-    type: 'slash',
-    action: 'invoke',
+    type: 'slash', action: 'invoke',
     guildId: interaction.guildId || 'dm',
     guildName: interaction.guild?.name || 'DM',
     channelName: interaction.channel?.name || 'dm',
-    userId: interaction.user.id,
-    userTag: interaction.user.tag,
-    commandName: interaction.commandName,
-    options: interaction.options?.data || [],
-    content: optsStr
+    userId: interaction.user.id, userTag: interaction.user.tag,
+    commandName: interaction.commandName, content: optsStr
   });
 
   try {
@@ -235,7 +220,7 @@ client.on('interactionCreate', async (interaction) => {
         return interaction.reply({ content: '❌ Nom invalide. Pas d’espace, 1–32 caractères.', flags: MessageFlags.Ephemeral });
       }
       const map = getGuildMap(interaction.guildId);
-      map[name] = msg; // stocké en minuscule
+      map[name] = msg;
       await saveCustom();
       return interaction.reply({ content: `✅ Ajouté: \`!${raw}\` (insensible à la casse)`, flags: MessageFlags.Ephemeral });
     }
@@ -246,10 +231,7 @@ client.on('interactionCreate', async (interaction) => {
       if (!entries.length) {
         return interaction.reply({ content: 'Aucune commande perso ici.', flags: MessageFlags.Ephemeral });
       }
-      const list = entries
-        .slice(0, 50)
-        .map(([k, v]) => `• \`!${k}\` → ${v.slice(0,60)}${v.length>60?'…':''}`)
-        .join('\n');
+      const list = entries.slice(0, 50).map(([k, v]) => `• \`!${k}\` → ${v.slice(0,60)}${v.length>60?'…':''}`).join('\n');
       return interaction.reply({ content: `**Commandes perso (${entries.length})**\n${list}`, flags: MessageFlags.Ephemeral });
     }
 
@@ -279,18 +261,17 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // exemples
     if (interaction.commandName === 'ping') {
       const ws = client.ws.ping;
       return interaction.reply({ content: `pong 🏓 (WS ~${ws}ms)`, flags: MessageFlags.Ephemeral });
     }
+
     if (interaction.commandName === 'say') {
       const m = interaction.options.getString('message', true);
       await interaction.reply({ content: '✅ Envoyé !', flags: MessageFlags.Ephemeral });
       return interaction.channel.send({ content: m, allowedMentions: { parse: [] } });
     }
 
-    // fallback
     const parts = [];
     for (const opt of interaction.options.data) if (opt?.value) parts.push(String(opt.value));
     const text = parts.join(' ').trim() || '(aucun texte)';
@@ -308,35 +289,119 @@ client.on('interactionCreate', async (interaction) => {
   }
 });
 
-// ====== Express / API / Dashboard
+/* =======================
+   PANEL AVEC MOT DE PASSE
+======================= */
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.static(path.join(__dirname, 'public')));
+// --- mini "session" via cookie signé en mémoire (simple)
+const SESSIONS = new Map(); // token -> { exp }
+const SESSION_TTL_DAYS = Number(process.env.SESSION_TTL_DAYS || 7);
+function createToken() {
+  const token = crypto.randomBytes(24).toString('base64url');
+  const exp = Date.now() + SESSION_TTL_DAYS * 24 * 60 * 60 * 1000;
+  SESSIONS.set(token, { exp });
+  return token;
+}
+function parseCookies(req) {
+  const h = req.headers.cookie;
+  if (!h) return {};
+  return Object.fromEntries(h.split(';').map(v => v.trim().split('=').map(decodeURIComponent)));
+}
+function isAuthed(req) {
+  const { panel } = parseCookies(req);
+  if (!panel) return false;
+  const s = SESSIONS.get(panel);
+  if (!s) return false;
+  if (Date.now() > s.exp) { SESSIONS.delete(panel); return false; }
+  return true;
+}
+function authGuard(req, res, next) {
+  // Autoriser librement la page login et le POST /api/login
+  if (req.path === '/login' || req.path === '/api/login') return next();
+  // Autoriser fichiers publics MINIMAUX utiles à /login (aucun chez nous)
+  // Tout le reste nécessite une session
+  if (!isAuthed(req)) return res.redirect('/login');
+  next();
+}
+
 app.use(express.json());
 
-// Console brute SSE (redirige console.log)
-const logBus = new EventEmitter();
-const origLog = console.log, origErr = console.error;
-function fmtLog(args) {
-  const s = args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
-  const ts = nowIso();
-  return `[${ts}] ${s}`;
-}
-console.log = (...args) => { const m = fmtLog(args); logBus.emit('msg', m); origLog(...args); };
-console.error = (...args) => { const m = fmtLog(args); logBus.emit('msg', m); origErr(...args); };
-
-// Protection API (x-api-key ; et ?key= pour SSE)
-app.use('/api', (req, res, next) => {
-  const required = process.env.DASHBOARD_API_KEY;
-  if (!required) return next();
-  const isStream = req.path.startsWith('/logs/stream') || req.path.startsWith('/events/stream');
-  const received = req.header('x-api-key') || (isStream ? req.query.key : '');
-  if (received !== required) return res.status(401).json({ error: 'API key invalide' });
-  next();
+// --- Page de login (HTML minimal intégré)
+app.get('/login', (req, res) => {
+  // si déjà connecté, on redirige
+  if (isAuthed(req)) return res.redirect('/');
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.end(`<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Connexion • Panel</title>
+<style>
+  body{background:#0f172a;color:#e2e8f0;font-family:system-ui,Segoe UI,Roboto,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
+  .card{background:#0b1220;border:1px solid #1e293b;border-radius:16px;padding:24px;width:320px;box-shadow:0 10px 30px rgba(0,0,0,.3)}
+  h1{font-size:18px;margin:0 0 12px}
+  input{width:100%;padding:10px;border-radius:10px;border:1px solid #334155;background:#0a0f1c;color:#e2e8f0;margin:8px 0}
+  button{width:100%;padding:10px;border-radius:10px;border:1px solid #4f46e5;background:#6366f1;color:#fff;font-weight:600;cursor:pointer}
+  .err{color:#fca5a5;font-size:12px;min-height:18px}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Connexion au panel</h1>
+    <div class="err" id="err"></div>
+    <input id="pw" type="password" placeholder="Mot de passe"/>
+    <button id="go">Se connecter</button>
+  </div>
+<script>
+  const btn = document.getElementById('go');
+  const pw  = document.getElementById('pw');
+  const err = document.getElementById('err');
+  btn.onclick = async () => {
+    err.textContent = '';
+    const res = await fetch('/api/login', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ password: pw.value })
+    });
+    if (res.ok) location.href = '/';
+    else err.textContent = (await res.json().catch(()=>({error:'Accès refusé'}))).error || 'Accès refusé';
+  };
+  pw.addEventListener('keydown', (e)=>{ if(e.key==='Enter') btn.click(); });
+</script>
+</body>
+</html>`);
 });
 
-// Status / guilds / channels / send
+// --- API: login / logout
+app.post('/api/login', (req, res) => {
+  const provided = String(req.body?.password || '');
+  const expected = String(process.env.PANEL_PASSWORD || '');
+  if (!expected) return res.status(500).json({ error: 'PANEL_PASSWORD manquant côté serveur' });
+  if (provided !== expected) return res.status(401).json({ error: 'Mot de passe incorrect' });
+
+  const token = createToken();
+  res.cookie
+    ? res.cookie('panel', token, { httpOnly: true, sameSite: 'lax', maxAge: SESSION_TTL_DAYS*24*60*60*1000 })
+    : res.setHeader('Set-Cookie', `panel=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${SESSION_TTL_DAYS*24*60*60}`);
+  res.json({ ok: true });
+});
+app.post('/api/logout', (req, res) => {
+  const { panel } = parseCookies(req);
+  if (panel) SESSIONS.delete(panel);
+  res.setHeader('Set-Cookie', `panel=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0`);
+  res.json({ ok: true });
+});
+
+// --- Tout ce qui suit est protégé
+app.use(authGuard);
+
+// Fichiers statiques du dashboard (protégés)
+app.use('/public', express.static(path.join(__dirname, 'public')));
+
+// API protégée (plus de x-api-key, tout passe par la session)
 app.get('/api/status', (_req, res) => {
   res.json({
     online: client.ws.status === 0,
@@ -410,7 +475,7 @@ app.delete('/api/custom/remove', async (req, res) => {
   } catch { res.status(500).json({ error: 'Échec suppression commande' }); }
 });
 
-// Slash management (list/create/delete)
+// Slash management
 app.get('/api/slash/list', async (req, res) => {
   try {
     if (!APPLICATION_ID) return res.status(500).json({ error: 'APPLICATION_ID manquant' });
@@ -430,7 +495,7 @@ app.post('/api/slash/create', async (req, res) => {
     const NAME_RE = /^[a-z0-9_-]{1,32}$/;
     const normalize = s => String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,'-').replace(/[^a-z0-9_-]/g,'').slice(0,32);
     name = normalize(name);
-    if (!NAME_RE.test(name)) return res.status(400).json({ error: 'Nom invalide (a-z 0-9 _ -, 1–32)' });
+    if (!NAME_RE.test(name)) return res.status(400).json({ error: 'Nom invalide (a-z 0 9 _ -, 1–32)' });
     const cleanOptions = (options||[]).map(o => {
       const on = normalize(o.name); if (!NAME_RE.test(on)) throw new Error(`Option name invalide: ${o.name}`);
       const od = String(o.description||'').slice(0,100) || 'option';
@@ -460,7 +525,17 @@ app.delete('/api/slash/delete', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.rawError?.message || e.message || 'Échec suppression' }); }
 });
 
-// --- SSE: console brute
+// SSE console (redirige console.log / console.error) — protégé
+const logBus = new EventEmitter();
+const origLog = console.log, origErr = console.error;
+function fmtLog(args) {
+  const s = args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+  const ts = nowIso();
+  return `[${ts}] ${s}`;
+}
+console.log = (...args) => { const m = fmtLog(args); logBus.emit('msg', m); origLog(...args); };
+console.error = (...args) => { const m = fmtLog(args); logBus.emit('msg', m); origErr(...args); };
+
 app.get('/api/logs/stream', (req, res) => {
   res.set({ 'Content-Type':'text/event-stream','Cache-Control':'no-cache','Connection':'keep-alive' });
   res.flushHeaders?.();
@@ -472,7 +547,7 @@ app.get('/api/logs/stream', (req, res) => {
   req.on('close', () => { clearInterval(keep); logBus.off('msg', onMsg); });
 });
 
-// --- SSE: événements structurés (slash/custom/message/error)
+// SSE événements structurés — protégé
 app.get('/api/events/stream', (req, res) => {
   res.set({ 'Content-Type':'text/event-stream','Cache-Control':'no-cache','Connection':'keep-alive' });
   res.flushHeaders?.();
@@ -484,7 +559,7 @@ app.get('/api/events/stream', (req, res) => {
   req.on('close', () => { clearInterval(keep); eventBus.off('evt', onEvt); });
 });
 
-// --- Historique events
+// Historique — protégé
 app.get('/api/events/files', async (_req, res) => {
   const files = (await fs.readdir(DATA_DIR))
     .filter(f => /^events-\d{4}-\d{2}-\d{2}\.jsonl$/.test(f))
@@ -507,8 +582,10 @@ app.get('/api/events/query', (req, res) => {
   res.json({ events: items });
 });
 
-// Root
-app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+// Dashboard (index) — protégé
+app.get('/', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 // Start
 app.listen(PORT, () => {
